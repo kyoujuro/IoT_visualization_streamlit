@@ -3,9 +3,10 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from xgboost import XGBClassifier
+import shap
 
 # --- データ生成 ---
 @st.cache_data
@@ -29,11 +30,11 @@ st.sidebar.title("センサー選択")
 selected_devices = st.sidebar.multiselect("表示するセンサー", options=df["device_id"].unique(), default=df["device_id"].unique())
 df = df[df["device_id"].isin(selected_devices)]
 
-# --- 機械学習モデル ---
+# --- 機械学習モデル（XGBoost） ---
 X = df[["temperature", "humidity"]]
 y = df["label"]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-clf = RandomForestClassifier(n_estimators=100, random_state=0)
+clf = XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=0)
 clf.fit(X_train, y_train)
 df["predicted_label"] = clf.predict(X)
 
@@ -44,7 +45,7 @@ hum_now = latest["humidity"]
 pred_now = latest["predicted_label"]
 
 # --- UI表示 ---
-st.title("IoTダッシュボード + 異常予測（複数センサー対応）")
+st.title("IoTダッシュボード + 異常予測（XGBoost + 複数センサー対応）")
 
 col1, col2, col3 = st.columns(3)
 col1.metric("平均温度", f"{df['temperature'].mean():.2f} °C")
@@ -52,7 +53,7 @@ col2.metric("平均湿度", f"{df['humidity'].mean():.2f} %")
 col3.metric("異常予測", "異常" if pred_now == 1 else "正常", delta=f"{int(df['predicted_label'].sum())} 件")
 
 # --- タコメータ表示 ---
-st.subheader(" タコメータ")
+st.subheader("タコメータ")
 gauge_temp = go.Figure(go.Indicator(
     mode="gauge+number+delta",
     value=temp_now,
@@ -98,6 +99,14 @@ with st.expander("モデル評価（分類レポート）"):
     y_pred_test = clf.predict(X_test)
     report = classification_report(y_test, y_pred_test, output_dict=True)
     st.dataframe(pd.DataFrame(report).transpose())
+
+# --- 特徴量重要度（SHAP） ---
+with st.expander("特徴量重要度（SHAP）"):
+    explainer = shap.Explainer(clf)
+    shap_values = explainer(X)
+    st.set_option('deprecation.showPyplotGlobalUse', False)
+    shap.summary_plot(shap_values, X, plot_type="bar")
+    st.pyplot(bbox_inches='tight')
 
 # --- 最新データ表示 ---
 st.subheader("最新データ")
